@@ -5,10 +5,12 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert } from '@/components/ui/alert';
 import { ButtonLink } from '@/components/ui/button';
+import { ConfirmButton } from '@/components/ui/confirm-button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PackageIcon, PlusIcon, ArrowRightIcon } from '@/components/icons';
+import { PackageIcon, PlusIcon, ArrowRightIcon, TrashIcon } from '@/components/icons';
 import { formatDate } from '@/lib/utils';
 import { NewOrderForm } from './new-order-form';
+import { deleteOrderAction } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,6 +55,7 @@ export default async function OrdersPage({
       />
 
       {params.ok === 'created' && <Alert tone="success">Order created and review schedule generated.</Alert>}
+      {params.ok === 'deleted' && <Alert tone="success">Order deleted.</Alert>}
       {params.error && <Alert tone="error">{params.error}</Alert>}
 
       {showForm && <NewOrderForm clients={clients} />}
@@ -71,9 +74,9 @@ export default async function OrdersPage({
               <div className="col-span-3">Order</div>
               <div className="col-span-3">Client</div>
               <div className="col-span-2">Progress</div>
-              <div className="col-span-2">Started</div>
+              <div className="col-span-1">Started</div>
               <div className="col-span-1">Status</div>
-              <div className="col-span-1 text-right" />
+              <div className="col-span-2 text-right">Actions</div>
             </div>
             {orders.map((o) => {
               const client = clientMap.get(o.client_id);
@@ -83,20 +86,19 @@ export default async function OrdersPage({
               const inFlight = Number(o.reviews_in_flight || 0);
               const waiting = Number(o.reviews_waiting || 0);
               return (
-                <Link
+                <div
                   key={o.order_id}
-                  href={`/admin/orders/${o.order_id}`}
                   className="grid grid-cols-1 gap-2 px-5 py-4 text-sm transition hover:bg-slate-50 sm:grid-cols-12 sm:items-center sm:gap-4"
                 >
-                  <div className="sm:col-span-3">
+                  <Link href={`/admin/orders/${o.order_id}`} className="sm:col-span-3">
                     <div className="font-mono text-xs font-semibold text-slate-900">{o.order_code || '—'}</div>
                     <div className="mt-0.5 text-xs text-slate-500">{o.quantity} reviews · {o.cadence_days}d cadence</div>
-                  </div>
-                  <div className="sm:col-span-3">
+                  </Link>
+                  <Link href={`/admin/orders/${o.order_id}`} className="sm:col-span-3">
                     <div className="font-medium text-slate-900">{client?.name || '—'}</div>
                     <div className="text-xs text-slate-500">{client?.platform || ''}</div>
-                  </div>
-                  <div className="sm:col-span-2">
+                  </Link>
+                  <Link href={`/admin/orders/${o.order_id}`} className="sm:col-span-2">
                     <div className="flex items-center gap-2 tabular-nums text-xs text-slate-600">
                       <span className="font-semibold text-slate-900">{live}</span>
                       <span className="text-slate-400">/</span>
@@ -112,17 +114,34 @@ export default async function OrdersPage({
                         {waiting > 0 && <span>{waiting} waiting</span>}
                       </div>
                     )}
-                  </div>
-                  <div className="text-xs text-slate-500 sm:col-span-2">{formatDate(o.start_date)}</div>
-                  <div className="sm:col-span-1">
+                  </Link>
+                  <Link href={`/admin/orders/${o.order_id}`} className="text-xs text-slate-500 sm:col-span-1">
+                    {formatDate(o.start_date)}
+                  </Link>
+                  <Link href={`/admin/orders/${o.order_id}`} className="sm:col-span-1">
                     <Badge tone={o.status === 'active' ? 'emerald' : o.status === 'completed' ? 'blue' : o.status === 'paused' ? 'amber' : 'slate'}>
                       {o.status}
                     </Badge>
+                  </Link>
+                  <div className="flex items-center justify-end gap-2 sm:col-span-2">
+                    <Link
+                      href={`/admin/orders/${o.order_id}`}
+                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                    >
+                      Open <ArrowRightIcon size={14} />
+                    </Link>
+                    <form action={deleteOrderAction}>
+                      <input type="hidden" name="id" value={o.order_id} />
+                      <ConfirmButton
+                        message={`Delete order ${o.order_code}? ${o.quantity} review row${o.quantity === 1 ? '' : 's'} will be deleted. This cannot be undone.`}
+                        className="inline-flex items-center rounded-md p-1.5 text-rose-600 hover:bg-rose-50"
+                        title="Delete order"
+                      >
+                        <TrashIcon size={14} />
+                      </ConfirmButton>
+                    </form>
                   </div>
-                  <div className="hidden text-slate-400 sm:col-span-1 sm:flex sm:justify-end">
-                    <ArrowRightIcon size={16} />
-                  </div>
-                </Link>
+                </div>
               );
             })}
           </div>

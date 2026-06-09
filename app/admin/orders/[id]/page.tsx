@@ -6,9 +6,14 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/ui/badge';
 import { Alert } from '@/components/ui/alert';
+import { ButtonLink } from '@/components/ui/button';
+import { ConfirmButton } from '@/components/ui/confirm-button';
+import { PencilIcon, TrashIcon } from '@/components/icons';
 import { formatDate } from '@/lib/utils';
 import type { ReviewStatus } from '@/lib/utils';
-import { updateOrderStatusAction } from '../actions';
+import { updateOrderStatusAction, deleteOrderAction } from '../actions';
+import { EditOrderForm } from './edit-order-form';
+import { ReviewTextEditor } from './review-text-editor';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,10 +22,11 @@ export default async function OrderDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ ok?: string; error?: string }>;
+  searchParams: Promise<{ ok?: string; error?: string; mode?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
+  const editMode = sp.mode === 'edit';
   const supabase = await createClient();
 
   const [orderRes, progressRes, reviewsRes] = await Promise.all([
@@ -70,15 +76,45 @@ export default async function OrderDetailPage({
         title={order.order_code || 'Order'}
         description={client ? `${client.name} · ${client.platform}` : undefined}
         action={
-          <Badge tone={order.status === 'active' ? 'emerald' : order.status === 'completed' ? 'blue' : order.status === 'paused' ? 'amber' : 'slate'}>
-            {order.status}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge tone={order.status === 'active' ? 'emerald' : order.status === 'completed' ? 'blue' : order.status === 'paused' ? 'amber' : 'slate'}>
+              {order.status}
+            </Badge>
+            {!editMode && (
+              <ButtonLink href={`/admin/orders/${order.id}?mode=edit`} variant="outline">
+                <PencilIcon size={14} /> Edit
+              </ButtonLink>
+            )}
+            <form action={deleteOrderAction}>
+              <input type="hidden" name="id" value={order.id} />
+              <ConfirmButton
+                message={`Delete this entire order? ${reviews.length} review row${reviews.length === 1 ? '' : 's'} will be deleted. This cannot be undone.`}
+                className="inline-flex items-center gap-1 rounded-md border border-rose-300 bg-white px-2.5 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
+              >
+                <TrashIcon size={14} /> Delete order
+              </ConfirmButton>
+            </form>
+          </div>
         }
       />
 
       {sp.ok === 'created' && <Alert tone="success">Order created. The review schedule below was generated automatically.</Alert>}
       {sp.ok === 'updated' && <Alert tone="success">Order updated.</Alert>}
+      {sp.ok === 'text_updated' && <Alert tone="success">Review text updated.</Alert>}
       {sp.error && <Alert tone="error">{sp.error}</Alert>}
+
+      {editMode && (
+        <EditOrderForm
+          order={{
+            id: order.id,
+            customer_name: order.customer_name,
+            customer_email: order.customer_email,
+            cadence_days: order.cadence_days,
+            notes: order.notes,
+          }}
+          cancelHref={`/admin/orders/${order.id}`}
+        />
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard label="Quantity" value={`${order.quantity}`} />
@@ -155,7 +191,7 @@ export default async function OrderDetailPage({
         </CardHeader>
         <div className="divide-y divide-slate-100">
           {reviews.map((r) => (
-            <div key={r.id} className="px-5 py-4">
+            <div key={r.id} id={`review-${r.id}`} className="px-5 py-4">
               <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-12 sm:items-center sm:gap-4">
                 <div className="text-slate-500 tabular-nums sm:col-span-1">#{r.sequence_number}</div>
                 <div className="font-mono text-xs sm:col-span-2">
@@ -177,19 +213,12 @@ export default async function OrderDetailPage({
                   <StatusBadge status={r.status as ReviewStatus} />
                 </div>
               </div>
-              {r.review_text ? (
-                <div className="mt-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-700">
-                  <div className="mb-0.5 flex items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500">
-                    Review text
-                    {r.review_text_edited_by_supplier && (
-                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">Edited by supplier</span>
-                    )}
-                  </div>
-                  <div className="whitespace-pre-wrap leading-relaxed">{r.review_text}</div>
-                </div>
-              ) : (
-                <div className="mt-2 text-xs italic text-slate-400">No review text assigned yet</div>
-              )}
+              <ReviewTextEditor
+                reviewId={r.id}
+                orderId={order.id}
+                currentText={r.review_text}
+                wasEditedBySupplier={!!r.review_text_edited_by_supplier}
+              />
             </div>
           ))}
         </div>

@@ -124,3 +124,99 @@ export async function updateOrderStatusAction(formData: FormData) {
   revalidatePath(`/admin/orders/${id}`);
   redirect(`/admin/orders/${id}?ok=updated`);
 }
+
+/**
+ * Edit an order's customer info, cadence, notes.
+ * Does NOT touch quantity, client_id, or start_date (those would invalidate
+ * the already-generated review schedule).
+ */
+export async function updateOrderAction(formData: FormData) {
+  await requireAdminOrExec();
+  const supabase = await createClient();
+
+  const id = String(formData.get('id') || '');
+  if (!id) redirect('/admin/orders?error=Missing+order+id');
+
+  const customer_name = String(formData.get('customer_name') || '').trim() || null;
+  const customer_email = String(formData.get('customer_email') || '').trim() || null;
+  const notes = String(formData.get('notes') || '').trim() || null;
+  const cadenceRaw = String(formData.get('cadence_days') || '');
+
+  const updateData: Record<string, unknown> = {
+    customer_name,
+    customer_email,
+    notes,
+  };
+
+  if (cadenceRaw) {
+    const cadence_days = parseInt(cadenceRaw, 10);
+    if (!Number.isFinite(cadence_days) || cadence_days < 1 || cadence_days > 30) {
+      redirect(`/admin/orders/${id}?error=${encodeURIComponent('Cadence must be between 1 and 30 days')}`);
+    }
+    updateData.cadence_days = cadence_days;
+  }
+
+  const { error } = await supabase.from('orders').update(updateData).eq('id', id);
+  if (error) {
+    redirect(`/admin/orders/${id}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${id}`);
+  redirect(`/admin/orders/${id}?ok=updated`);
+}
+
+/**
+ * Hard-delete an order. Database cascade should remove all associated reviews.
+ * If the FK is not ON DELETE CASCADE, this will surface the error to the user.
+ */
+export async function deleteOrderAction(formData: FormData) {
+  await requireAdminOrExec();
+  const supabase = await createClient();
+
+  const id = String(formData.get('id') || '');
+  if (!id) redirect('/admin/orders?error=Missing+order+id');
+
+  // Best-effort: delete reviews first so we don't depend on FK cascade behavior.
+  // If a review is posted (live), we still allow delete — admin decision.
+  const { error: revErr } = await supabase.from('reviews').delete().eq('order_id', id);
+  if (revErr) {
+    redirect(`/admin/orders/${id}?error=${encodeURIComponent('Could not delete reviews: ' + revErr.message)}`);
+  }
+
+  const { error } = await supabase.from('orders').delete().eq('id', id);
+  if (error) {
+    redirect(`/admin/orders/${id}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath('/admin/orders');
+  redirect('/admin/orders?ok=deleted');
+}
+
+/**
+ * Edit a single review's text from the admin order detail page.
+ * Does NOT set review_text_edited_by_supplier — that flag is for supplier edits.
+ */
+export async function updateReviewTextAction(formData: FormData) {
+  await requireAdminOrExec();
+  const supabase = await createClient();
+
+  const review_id = String(formData.get('review_id') || '');
+  const order_id = String(formData.get('order_id') || '');
+  const review_text = String(formData.get('review_text') || '').trim();
+
+  if (!review_id || !order_id) {
+    redirect(`/admin/orders/${order_id}?error=Missing+review+id`);
+  }
+
+  const { error } = await supabase
+    .from('reviews')
+    .update({ review_text: review_text || null })
+    .eq('id', review_id);
+
+  if (error) {
+    redirect(`/admin/orders/${order_id}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/admin/orders/${order_id}`);
+  redirect(`/admin/orders/${order_id}?ok=text_updated#review-${review_id}`);
+}
