@@ -6,7 +6,6 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/ui/badge';
 import { Alert } from '@/components/ui/alert';
-import { ButtonLink } from '@/components/ui/button';
 import { formatDate } from '@/lib/utils';
 import type { ReviewStatus } from '@/lib/utils';
 import { updateOrderStatusAction } from '../actions';
@@ -24,21 +23,16 @@ export default async function OrderDetailPage({
   const sp = await searchParams;
   const supabase = await createClient();
 
-  // Order with client + progress
   const [orderRes, progressRes, reviewsRes] = await Promise.all([
     supabase
       .from('orders')
       .select('id, order_code, client_id, quantity, cadence_days, order_date, start_date, customer_name, customer_email, status, notes, created_at')
       .eq('id', id)
       .maybeSingle(),
-    supabase
-      .from('order_progress')
-      .select('*')
-      .eq('order_id', id)
-      .maybeSingle(),
+    supabase.from('order_progress').select('*').eq('order_id', id).maybeSingle(),
     supabase
       .from('reviews')
-      .select('id, review_code, sequence_number, scheduled_date, dispatched_date, posted_date, posted_url, status, main_supplier_id, reviewer_identifier')
+      .select('id, review_code, sequence_number, scheduled_date, dispatched_date, posted_date, posted_url, status, main_supplier_id, reviewer_identifier, review_text, review_text_edited_by_supplier')
       .eq('order_id', id)
       .order('sequence_number', { ascending: true }),
   ]);
@@ -48,36 +42,28 @@ export default async function OrderDetailPage({
   const progress = progressRes.data;
   const reviews = reviewsRes.data || [];
 
-  // Client info
   const { data: client } = await supabase
     .from('clients')
     .select('id, name, platform, location, review_url')
     .eq('id', order.client_id)
     .maybeSingle();
 
-  // Supplier names for the schedule rows
-  const supplierIds = Array.from(
-    new Set(reviews.map((r) => r.main_supplier_id).filter(Boolean) as string[])
-  );
+  const supplierIds = Array.from(new Set(reviews.map((r) => r.main_supplier_id).filter(Boolean) as string[]));
   const supplierMap = new Map<string, string>();
   if (supplierIds.length > 0) {
-    const { data: suppliers } = await supabase
-      .from('main_suppliers')
-      .select('id, name')
-      .in('id', supplierIds);
+    const { data: suppliers } = await supabase.from('main_suppliers').select('id, name').in('id', supplierIds);
     (suppliers || []).forEach((s) => supplierMap.set(s.id, s.name));
   }
 
   const live = Number(progress?.reviews_live || 0);
   const total = order.quantity;
   const pct = total > 0 ? Math.round((live / total) * 100) : 0;
+  const reviewsWithText = reviews.filter((r) => r.review_text).length;
 
   return (
     <div className="space-y-6">
       <div>
-        <Link href="/admin/orders" className="text-sm text-slate-500 hover:text-slate-900">
-          ← All orders
-        </Link>
+        <Link href="/admin/orders" className="text-sm text-slate-500 hover:text-slate-900">← All orders</Link>
       </div>
 
       <PageHeader
@@ -94,24 +80,16 @@ export default async function OrderDetailPage({
       {sp.ok === 'updated' && <Alert tone="success">Order updated.</Alert>}
       {sp.error && <Alert tone="error">{sp.error}</Alert>}
 
-      {/* Summary cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard label="Quantity" value={`${order.quantity}`} />
         <SummaryCard label="Cadence" value={`${order.cadence_days} days`} />
         <SummaryCard label="Start" value={formatDate(order.start_date)} />
-        <SummaryCard
-          label="Live"
-          value={`${live} / ${total}`}
-          subtext={`${pct}% complete`}
-        />
+        <SummaryCard label="Live" value={`${live} / ${total}`} subtext={`${pct}% complete`} />
       </div>
 
-      {/* Progress detail */}
       {progress && (
         <Card>
-          <CardHeader>
-            <CardTitle>Progress</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle>Progress</CardTitle></CardHeader>
           <CardBody className="space-y-3">
             <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
               <div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
@@ -128,11 +106,8 @@ export default async function OrderDetailPage({
         </Card>
       )}
 
-      {/* Order metadata */}
       <Card>
-        <CardHeader>
-          <CardTitle>Order details</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Order details</CardTitle></CardHeader>
         <CardBody className="grid gap-4 sm:grid-cols-2">
           <Detail label="Customer" value={order.customer_name || '—'} />
           <Detail label="Customer email" value={order.customer_email || '—'} />
@@ -149,11 +124,8 @@ export default async function OrderDetailPage({
         </CardBody>
       </Card>
 
-      {/* Status controls */}
       <Card>
-        <CardHeader>
-          <CardTitle>Order status</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Order status</CardTitle></CardHeader>
         <CardBody>
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-slate-500">Change status to:</span>
@@ -163,10 +135,7 @@ export default async function OrderDetailPage({
                 <form action={updateOrderStatusAction} key={next}>
                   <input type="hidden" name="id" value={order.id} />
                   <input type="hidden" name="status" value={next} />
-                  <button
-                    type="submit"
-                    className="rounded-md px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-100"
-                  >
+                  <button type="submit" className="rounded-md px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-100">
                     {next}
                   </button>
                 </form>
@@ -175,42 +144,52 @@ export default async function OrderDetailPage({
         </CardBody>
       </Card>
 
-      {/* Schedule */}
       <Card>
         <CardHeader>
-          <CardTitle>Review schedule ({reviews.length})</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>Review schedule ({reviews.length})</CardTitle>
+            <div className="text-xs text-slate-500">
+              {reviewsWithText} of {reviews.length} have review text
+            </div>
+          </div>
         </CardHeader>
         <div className="divide-y divide-slate-100">
-          <div className="hidden grid-cols-12 gap-4 px-5 py-3 text-xs font-medium uppercase tracking-wide text-slate-500 sm:grid">
-            <div className="col-span-1">#</div>
-            <div className="col-span-2">Code</div>
-            <div className="col-span-2">Scheduled</div>
-            <div className="col-span-2">Dispatched</div>
-            <div className="col-span-2">Posted</div>
-            <div className="col-span-2">Supplier</div>
-            <div className="col-span-1 text-right">Status</div>
-          </div>
           {reviews.map((r) => (
-            <div key={r.id} className="grid grid-cols-1 gap-2 px-5 py-3 text-sm sm:grid-cols-12 sm:items-center sm:gap-4">
-              <div className="text-slate-500 tabular-nums sm:col-span-1">#{r.sequence_number}</div>
-              <div className="font-mono text-xs sm:col-span-2">
-                {r.posted_url ? (
-                  <a href={r.posted_url} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:underline">
-                    {r.review_code}
-                  </a>
-                ) : (
-                  <span className="text-slate-700">{r.review_code}</span>
-                )}
+            <div key={r.id} className="px-5 py-4">
+              <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-12 sm:items-center sm:gap-4">
+                <div className="text-slate-500 tabular-nums sm:col-span-1">#{r.sequence_number}</div>
+                <div className="font-mono text-xs sm:col-span-2">
+                  {r.posted_url ? (
+                    <a href={r.posted_url} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:underline">
+                      {r.review_code}
+                    </a>
+                  ) : (
+                    <span className="text-slate-700">{r.review_code}</span>
+                  )}
+                </div>
+                <div className="text-xs text-slate-600 sm:col-span-2">{formatDate(r.scheduled_date)}</div>
+                <div className="text-xs text-slate-600 sm:col-span-2">{r.dispatched_date ? formatDate(r.dispatched_date) : '—'}</div>
+                <div className="text-xs text-slate-600 sm:col-span-2">{r.posted_date ? formatDate(r.posted_date) : '—'}</div>
+                <div className="truncate text-xs text-slate-600 sm:col-span-2">
+                  {r.main_supplier_id ? supplierMap.get(r.main_supplier_id) || '—' : <span className="text-slate-400">—</span>}
+                </div>
+                <div className="sm:col-span-1 sm:text-right">
+                  <StatusBadge status={r.status as ReviewStatus} />
+                </div>
               </div>
-              <div className="text-xs text-slate-600 sm:col-span-2">{formatDate(r.scheduled_date)}</div>
-              <div className="text-xs text-slate-600 sm:col-span-2">{r.dispatched_date ? formatDate(r.dispatched_date) : '—'}</div>
-              <div className="text-xs text-slate-600 sm:col-span-2">{r.posted_date ? formatDate(r.posted_date) : '—'}</div>
-              <div className="truncate text-xs text-slate-600 sm:col-span-2">
-                {r.main_supplier_id ? supplierMap.get(r.main_supplier_id) || '—' : <span className="text-slate-400">—</span>}
-              </div>
-              <div className="sm:col-span-1 sm:text-right">
-                <StatusBadge status={r.status as ReviewStatus} />
-              </div>
+              {r.review_text ? (
+                <div className="mt-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                  <div className="mb-0.5 flex items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500">
+                    Review text
+                    {r.review_text_edited_by_supplier && (
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">Edited by supplier</span>
+                    )}
+                  </div>
+                  <div className="whitespace-pre-wrap leading-relaxed">{r.review_text}</div>
+                </div>
+              ) : (
+                <div className="mt-2 text-xs italic text-slate-400">No review text assigned yet</div>
+              )}
             </div>
           ))}
         </div>
