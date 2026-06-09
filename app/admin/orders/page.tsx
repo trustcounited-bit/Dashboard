@@ -1,15 +1,14 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { PageHeader } from '@/components/ui/page-header';
-import { Card, CardBody } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert } from '@/components/ui/alert';
-import { ButtonLink, Button } from '@/components/ui/button';
+import { ButtonLink } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { FormField, Input, Select, Textarea } from '@/components/ui/form';
 import { PackageIcon, PlusIcon, ArrowRightIcon } from '@/components/icons';
 import { formatDate } from '@/lib/utils';
-import { createOrderAction } from './actions';
+import { NewOrderForm } from './new-order-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,12 +21,8 @@ export default async function OrdersPage({
   const showForm = params.form === 'open';
   const supabase = await createClient();
 
-  // Load orders + clients in parallel
   const [ordersRes, clientsRes] = await Promise.all([
-    supabase
-      .from('order_progress')
-      .select('*')
-      .order('created_at', { ascending: false }),
+    supabase.from('order_progress').select('*').order('created_at', { ascending: false }),
     supabase
       .from('clients')
       .select('id, name, platform, status')
@@ -38,10 +33,7 @@ export default async function OrdersPage({
   const orders = ordersRes.data || [];
   const clients = clientsRes.data || [];
 
-  // Build client lookup for order display
-  const { data: clientLookup } = await supabase
-    .from('clients')
-    .select('id, name, platform');
+  const { data: clientLookup } = await supabase.from('clients').select('id, name, platform');
   const clientMap = new Map((clientLookup || []).map((c) => [c.id, c]));
 
   return (
@@ -51,9 +43,7 @@ export default async function OrdersPage({
         description="Each order is exploded into individual review tasks based on quantity and cadence. Suppliers are not pre-assigned — assignment happens daily on the Today page."
         action={
           showForm ? (
-            <ButtonLink href="/admin/orders" variant="outline">
-              Cancel
-            </ButtonLink>
+            <ButtonLink href="/admin/orders" variant="outline">Cancel</ButtonLink>
           ) : (
             <ButtonLink href="/admin/orders?form=open">
               <PlusIcon size={16} /> New order
@@ -65,63 +55,7 @@ export default async function OrdersPage({
       {params.ok === 'created' && <Alert tone="success">Order created and review schedule generated.</Alert>}
       {params.error && <Alert tone="error">{params.error}</Alert>}
 
-      {showForm && (
-        <Card>
-          <CardBody>
-            {clients.length === 0 ? (
-              <Alert tone="warning" title="Add a client first">
-                You need at least one active client before creating an order.{' '}
-                <Link href="/admin/clients?form=open" className="underline">Add a client →</Link>
-              </Alert>
-            ) : (
-              <form action={createOrderAction} className="space-y-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <FormField label="Client" htmlFor="client_id" required>
-                    <Select id="client_id" name="client_id" required defaultValue="" autoFocus>
-                      <option value="" disabled>Choose a client…</option>
-                      {clients.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} · {c.platform}
-                        </option>
-                      ))}
-                    </Select>
-                  </FormField>
-                  <FormField label="Quantity" htmlFor="quantity" required hint="Total reviews to deliver for this order">
-                    <Input id="quantity" name="quantity" type="number" min="1" max="10000" required placeholder="e.g. 100" />
-                  </FormField>
-                  <FormField
-                    label="Cadence (days between reviews)"
-                    htmlFor="cadence_days"
-                    required
-                    hint="3 days is the default and matches typical platform tolerance"
-                  >
-                    <Input id="cadence_days" name="cadence_days" type="number" min="1" max="30" defaultValue="3" required />
-                  </FormField>
-                  <FormField label="Start date" htmlFor="start_date" hint="Defaults to today">
-                    <Input id="start_date" name="start_date" type="date" />
-                  </FormField>
-                  <FormField label="Customer name" htmlFor="customer_name" hint="Whoever placed the order, if different from client">
-                    <Input id="customer_name" name="customer_name" />
-                  </FormField>
-                  <FormField label="Customer email" htmlFor="customer_email">
-                    <Input id="customer_email" name="customer_email" type="email" />
-                  </FormField>
-                </div>
-                <FormField label="Notes" htmlFor="notes">
-                  <Textarea id="notes" name="notes" rows={2} />
-                </FormField>
-                <div className="rounded-md bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                  <strong>What happens next:</strong> Saving this order will automatically generate the full review schedule (one row per review, spaced by your cadence). Each row will appear on the Today page on its scheduled date for assignment to a supplier.
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <ButtonLink href="/admin/orders" variant="outline">Cancel</ButtonLink>
-                  <Button type="submit">Create order</Button>
-                </div>
-              </form>
-            )}
-          </CardBody>
-        </Card>
-      )}
+      {showForm && <NewOrderForm clients={clients} />}
 
       {orders.length === 0 ? (
         <EmptyState
