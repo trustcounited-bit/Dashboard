@@ -2,9 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireSupplier } from '@/lib/auth';
 import { PageHeader } from '@/components/ui/page-header';
 import { Alert } from '@/components/ui/alert';
-import { Card, CardBody } from '@/components/ui/card';
-import { ButtonLink } from '@/components/ui/button';
-import { SupplierTodayList, type SupplierReviewRow, type MyReviewer } from './today-list';
+import { SupplierTodayList, type SupplierReviewRow, type ReviewerHint } from './today-list';
 import type { ReviewStatus } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -18,10 +16,10 @@ export default async function SupplierTodayPage({
   const user = await requireSupplier();
   const supabase = await createClient();
 
-  // RLS already filters reviews to this supplier's main_supplier_id
+  // RLS scopes reviews to this supplier
   const { data: reviews, error } = await supabase
     .from('reviews')
-    .select('id, review_code, status, scheduled_date, dispatched_date, client_id')
+    .select('id, review_code, status, scheduled_date, dispatched_date, client_id, review_text, review_text_edited_by_supplier')
     .in('status', ['assigned_to_supplier', 'dispatched'])
     .order('dispatched_date', { ascending: true, nullsFirst: false })
     .order('scheduled_date', { ascending: true });
@@ -33,7 +31,8 @@ export default async function SupplierTodayPage({
     : { data: [] };
   const clientMap = new Map((clients || []).map((c) => [c.id, c]));
 
-  // Reviewer pool (RLS-scoped to this supplier)
+  // Existing reviewers for autocomplete suggestions only.
+  // Supplier can type a brand-new name and the system will auto-create.
   const { data: reviewerRows } = await supabase
     .from('reviewers')
     .select('id, name, identifier, lifetime_capacity, status')
@@ -57,23 +56,23 @@ export default async function SupplierTodayPage({
       client_name: c?.name || '—',
       client_platform: c?.platform || '',
       review_url: c?.review_url || null,
+      review_text: r.review_text,
+      review_text_edited_by_supplier: !!r.review_text_edited_by_supplier,
     };
   });
 
-  const reviewers: MyReviewer[] = (reviewerRows || []).map((r) => {
+  const reviewerHints: ReviewerHint[] = (reviewerRows || []).map((r) => {
     const cap = capMap.get(r.id) || { posted_count: 0, is_at_cap: false };
     return {
       id: r.id,
       name: r.name,
-      identifier: r.identifier,
       posted_count: cap.posted_count,
       lifetime_capacity: r.lifetime_capacity,
       is_at_cap: cap.is_at_cap,
     };
   });
 
-  // Parse eligibility error: format "eligibility:<code>" — but we don't know which row triggered it
-  // unless we encode that. Simpler: show as a top-level alert; user re-opens the row they were on.
+  // eligibility errors come back as ?error=eligibility:<CODE>
   const eligibilityWarning =
     params.error && params.error.startsWith('eligibility:') ? params.error.split(':')[1] : null;
   const otherError =
@@ -88,28 +87,13 @@ export default async function SupplierTodayPage({
 
       {params.ok && <Alert tone="success">{params.ok}</Alert>}
       {otherError && <Alert tone="error">{otherError}</Alert>}
-
       {error && <Alert tone="error">{error.message}</Alert>}
 
-      {reviewers.length === 0 ? (
-        <Card>
-          <CardBody className="space-y-3 text-center">
-            <div className="text-sm text-slate-700">
-              You don&rsquo;t have any reviewers in your pool yet. Add some first so you can record completions.
-            </div>
-            <div>
-              <ButtonLink href="/supplier/reviewers?form=open">Add your first reviewer</ButtonLink>
-            </div>
-          </CardBody>
-        </Card>
-      ) : (
-        <SupplierTodayList
-          rows={rows}
-          reviewers={reviewers}
-          eligibilityFor={null}
-          eligibilityWarning={eligibilityWarning}
-        />
-      )}
+      <SupplierTodayList
+        rows={rows}
+        reviewerHints={reviewerHints}
+        eligibilityWarning={eligibilityWarning}
+      />
     </div>
   );
 }
